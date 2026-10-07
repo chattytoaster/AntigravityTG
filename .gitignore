@@ -1,0 +1,17 @@
+# Environment & Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.venv
+venv/
+ENV/
+
+# Local databases & user data
+data/
+downloads/
+
+# Logs
+*.log
