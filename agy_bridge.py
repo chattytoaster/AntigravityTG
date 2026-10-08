@@ -33,6 +33,47 @@ def format_tool_status(tool_name: str, tool_info: Dict[str, Any]) -> str:
     else:
         return f"⚙️ Работаю с инструментом: <code>{tool_name}</code>"
 
+def sanitize_model_and_effort(model: Optional[str], effort: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Normalizes model to strip reasoning level suffixes and adjusts effort to match
+    the model's supported levels so Antigravity CLI does not error.
+    """
+    if not model:
+        return model, effort
+
+    m = model.strip()
+
+    # Normalize Gemini / known models by stripping legacy -high, -medium, -low suffixes
+    for suffix in ("-high", "-medium", "-low"):
+        if (m.startswith("gemini-") or m.startswith("gpt-oss-")) and m.endswith(suffix):
+            m = m[:-len(suffix)]
+            break
+
+    eff = effort.strip().lower() if effort else None
+
+    # Claude models do not accept --effort flag in agy CLI
+    if "claude" in m.lower():
+        return m, None
+
+    # GPT-OSS models only support medium effort
+    if "gpt-oss" in m.lower():
+        return m, "medium" if eff else None
+
+    # gemini-3.1-pro only supports low and high
+    if m == "gemini-3.1-pro":
+        if eff:
+            return m, "low" if eff == "low" else "high"
+        return m, eff
+
+    # gemini-3.7-flash and gemini-3.6-flash only support low, medium, high
+    if m in ("gemini-3.7-flash", "gemini-3.6-flash"):
+        if eff in ("xhigh", "max"):
+            return m, "high"
+        return m, eff
+
+    # gemini-3.8-flash and other models: supports low, medium, high, xhigh, max
+    return m, eff
+
 class AGYBridge:
     def __init__(self, executable_path: str = AGY_PATH):
         self.executable_path = executable_path
@@ -83,11 +124,13 @@ class AGYBridge:
         if conversation_id:
             cmd.extend(["--conversation", conversation_id])
 
-        if model:
-            cmd.extend(["--model", model])
+        eff_model, eff_effort = sanitize_model_and_effort(model, effort)
 
-        if effort and effort in ("low", "medium", "high", "xhigh", "max"):
-            cmd.extend(["--effort", effort])
+        if eff_model:
+            cmd.extend(["--model", eff_model])
+
+        if eff_effort and eff_effort in ("low", "medium", "high", "xhigh", "max"):
+            cmd.extend(["--effort", eff_effort])
 
         if execution_mode and execution_mode in ("accept-edits", "plan"):
             cmd.extend(["--mode", execution_mode])

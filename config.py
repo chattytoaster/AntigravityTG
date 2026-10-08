@@ -1,5 +1,6 @@
 import os
 import shutil
+from typing import Optional
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -54,8 +55,18 @@ DEFAULT_WORKING_DIR = os.getenv("DEFAULT_WORKING_DIR", str(BASE_DIR)).strip()
 if not os.path.exists(DEFAULT_WORKING_DIR):
     DEFAULT_WORKING_DIR = str(BASE_DIR)
 
+def normalize_model_name(model_name: Optional[str]) -> str:
+    """Strips reasoning effort suffixes (e.g. -high, -medium, -low) from model names."""
+    if not model_name:
+        return "gemini-3.8-flash"
+    m = model_name.strip()
+    for suffix in ("-high", "-medium", "-low"):
+        if (m.startswith("gemini-") or m.startswith("gpt-oss-")) and m.endswith(suffix):
+            return m[:-len(suffix)]
+    return m
+
 # Default model
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gemini-3.8-flash-high").strip()
+DEFAULT_MODEL = normalize_model_name(os.getenv("DEFAULT_MODEL", "gemini-3.8-flash"))
 
 # Auto-approve tool permissions (e.g. file editing, running commands)
 AUTO_APPROVE = os.getenv("AUTO_APPROVE", "true").lower() in ("true", "1", "yes")

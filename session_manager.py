@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
-from config import DB_PATH, DEFAULT_MODEL, DEFAULT_WORKING_DIR, AUTO_APPROVE
+from config import DB_PATH, DEFAULT_MODEL, DEFAULT_WORKING_DIR, AUTO_APPROVE, normalize_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +163,17 @@ class SessionManager:
             except Exception:
                 pass
 
+            # Migration: Normalize model names (remove legacy effort suffixes)
+            try:
+                for suffix in ("-high", "-medium", "-low"):
+                    await db.execute(f"""
+                        UPDATE sessions
+                        SET model = SUBSTR(model, 1, LENGTH(model) - {len(suffix)})
+                        WHERE model LIKE 'gemini-%{suffix}' OR model LIKE 'gpt-oss-%{suffix}'
+                    """)
+            except Exception:
+                pass
+
             await db.commit()
 
     async def get_session(
@@ -200,7 +211,7 @@ class SessionManager:
                     thread_id=thread_id if eff_thread > 0 else None,
                     conversation_id=row["conversation_id"],
                     topic_name=row["topic_name"] or ("AntigravityTG" if eff_thread == 0 else f"Проект #{eff_thread}"),
-                    model=row["model"] or DEFAULT_MODEL,
+                    model=normalize_model_name(row["model"]) if row["model"] else DEFAULT_MODEL,
                     working_dir=row["working_dir"] or DEFAULT_WORKING_DIR,
                     auto_approve=bool(row["auto_approve"]),
                     effort=row["effort"] or "high",
@@ -476,10 +487,11 @@ class SessionManager:
 
     async def set_model(self, session_key: Any, model: str):
         s_key = normalize_session_key(session_key)
+        norm_model = normalize_model_name(model)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "UPDATE sessions SET model = ?, updated_at = CURRENT_TIMESTAMP WHERE session_key = ?",
-                (model, s_key)
+                (norm_model, s_key)
             )
             await db.commit()
 
@@ -543,7 +555,7 @@ class SessionManager:
                     thread_id=eff_thread if eff_thread > 0 else None,
                     conversation_id=row["conversation_id"],
                     topic_name=row["topic_name"] or ("AntigravityTG" if eff_thread == 0 else f"Проект #{eff_thread}"),
-                    model=row["model"] or DEFAULT_MODEL,
+                    model=normalize_model_name(row["model"]) if row["model"] else DEFAULT_MODEL,
                     working_dir=row["working_dir"] or DEFAULT_WORKING_DIR,
                     auto_approve=bool(row["auto_approve"]),
                     effort=row["effort"] or "high",
@@ -608,7 +620,7 @@ class SessionManager:
                     thread_id=eff_thread if eff_thread > 0 else None,
                     conversation_id=row["conversation_id"],
                     topic_name=row["topic_name"] or "Диалог",
-                    model=row["model"] or DEFAULT_MODEL,
+                    model=normalize_model_name(row["model"]) if row["model"] else DEFAULT_MODEL,
                     working_dir=row["working_dir"] or DEFAULT_WORKING_DIR,
                     auto_approve=bool(row["auto_approve"]),
                     effort=row["effort"] or "high",
@@ -727,7 +739,7 @@ class SessionManager:
                     thread_id=eff_thread if eff_thread > 0 else None,
                     conversation_id=row["conversation_id"],
                     topic_name=row["topic_name"] or "AntigravityTG",
-                    model=row["model"] or DEFAULT_MODEL,
+                    model=normalize_model_name(row["model"]) if row["model"] else DEFAULT_MODEL,
                     working_dir=row["working_dir"] or DEFAULT_WORKING_DIR,
                     auto_approve=bool(row["auto_approve"]),
                     effort=row["effort"] or "high",

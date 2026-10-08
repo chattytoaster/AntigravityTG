@@ -26,6 +26,7 @@ from session_manager import session_manager
 from agy_bridge import agy_bridge
 from queue_manager import queue_manager, QueueItem
 from telegram_formatter import send_smart_message
+from config import normalize_model_name
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,11 +38,12 @@ DOWNLOADS_DIR = config.BASE_DIR / "downloads"
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
 AVAILABLE_MODELS = [
-    ("⚡ Gemini 3.8 Flash (High)", "gemini-3.8-flash-high"),
-    ("🧠 Gemini 3.1 Pro (High)", "gemini-3.1-pro-high"),
+    ("⚡ Gemini 3.8 Flash", "gemini-3.8-flash"),
+    ("✨ Gemini 3.7 Flash", "gemini-3.7-flash"),
+    ("🧠 Gemini 3.1 Pro", "gemini-3.1-pro"),
     ("🎭 Claude Sonnet 4.6", "claude-sonnet-4-6"),
     ("🔮 Claude Opus 4.6 (Thinking)", "claude-opus-4-6-thinking"),
-    ("🤖 GPT-OSS 120B (Medium)", "gpt-oss-120b-medium"),
+    ("🤖 GPT-OSS 120B", "gpt-oss-120b-medium"),
 ]
 
 AVAILABLE_EFFORTS = [
@@ -808,14 +810,35 @@ async def handle_model(message: types.Message):
         await send_unauthorized_msg(message)
         return
 
-    session = await session_manager.get_session(user_id=user_id, chat_id=chat_id, thread_id=thread_id)
+    parts = message.text.split(maxsplit=1)
+    if len(parts) > 1:
+        raw_val = parts[1].strip()
+        norm_val = normalize_model_name(raw_val)
+        await session_manager.set_model(session_key, norm_val)
+        await send_smart_message(
+            bot,
+            chat_id,
+            f"✅ **Модель установлена:** `{norm_val}`\n\n"
+            f"> [!TIP]\n"
+            f"> Уровень рассуждений настраивается отдельно командой `/effort`.",
+            message_thread_id=thread_id
+        )
+        return
+
+    session = await session_manager.get_session(user_id=user_id, chat_id=chat_id, thread_id=thread_id, session_key=session_key)
+    norm_current = normalize_model_name(session.model)
     buttons = []
     for label, model_id in AVAILABLE_MODELS:
-        prefix = "✅ " if model_id == session.model else ""
+        prefix = "✅ " if model_id == norm_current else ""
         buttons.append([InlineKeyboardButton(text=f"{prefix}{label}", callback_data=f"set_model:{model_id}")])
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
-    text = "# 🤖 Выбор нейросети\n\nВыберите базовую модель для решения задач в этом проекте:"
+    text = (
+        f"# 🤖 Выбор нейросети\n\n"
+        f"- **Текущая модель:** `{norm_current}`\n"
+        f"- **Уровень рассуждений (Effort):** `{session.effort}`\n\n"
+        f"Выберите базовую модель (глубина рассуждений регулируется командой `/effort`):"
+    )
     await send_smart_message(bot, chat_id, text, reply_markup=keyboard, message_thread_id=thread_id)
 
 @dp.callback_query(F.data.startswith("set_model:"))
@@ -825,8 +848,10 @@ async def handle_model_callback(callback: CallbackQuery):
         await callback.answer("Нет доступа", show_alert=True)
         return
 
-    new_model = callback.data.split(":", 1)[1]
+    raw_model = callback.data.split(":", 1)[1]
+    new_model = normalize_model_name(raw_model)
     await session_manager.set_model(session_key, new_model)
+    session = await session_manager.get_session(user_id=user_id, chat_id=chat_id, thread_id=thread_id, session_key=session_key)
     await callback.answer(f"Модель изменена на {new_model}")
 
     buttons = []
@@ -837,7 +862,9 @@ async def handle_model_callback(callback: CallbackQuery):
 
     try:
         await callback.message.edit_text(
-            f"<b>✅ Модель успешно изменена на:</b> <code>{new_model}</code>\n\nВыберите другую при необходимости:",
+            f"<b>✅ Модель успешно изменена на:</b> <code>{new_model}</code>\n"
+            f"<i>Текущий уровень рассуждений: <code>{session.effort}</code> (регулируется через /effort)</i>\n\n"
+            f"Выберите другую при необходимости:",
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML
         )
@@ -867,6 +894,8 @@ async def handle_effort(message: types.Message):
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     text = (
         f"# 🧠 Настройка глубины рассуждений (Effort)\n\n"
+        f"- **Текущая модель:** `{session.model}`\n"
+        f"- **Текущий уровень рассуждений:** `{session.effort}`\n\n"
         f"Определяет, сколько вычислительных ресурсов модель тратит на обдумывание перед ответом:"
     )
     await send_smart_message(bot, chat_id, text, reply_markup=keyboard, message_thread_id=thread_id)
@@ -880,6 +909,7 @@ async def handle_effort_callback(callback: CallbackQuery):
 
     new_effort = callback.data.split(":", 1)[1]
     await session_manager.set_effort(session_key, new_effort)
+    session = await session_manager.get_session(user_id=user_id, chat_id=chat_id, thread_id=thread_id, session_key=session_key)
     await callback.answer(f"Effort: {new_effort}")
 
     buttons = []
@@ -890,7 +920,8 @@ async def handle_effort_callback(callback: CallbackQuery):
 
     try:
         await callback.message.edit_text(
-            f"<b>✅ Уровень рассуждений изменен на:</b> <code>{new_effort}</code>",
+            f"<b>✅ Уровень рассуждений изменен на:</b> <code>{new_effort}</code>\n"
+            f"<i>Модель: <code>{session.model}</code></i>",
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML
         )
